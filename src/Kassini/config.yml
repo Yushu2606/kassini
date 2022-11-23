@@ -1,0 +1,121 @@
+﻿servers:
+
+  - bind:
+    - address: '*:443'
+      # certificate: letsencrypt
+      certificate: testCert
+      protocols:
+      - http2
+    - address: '*:80'
+      protocols:
+      - http1
+
+    httpsRedirection:
+        enabled: false
+        # port: 443
+
+    rewrite:
+    - from: ^rewrite-rule/(\d+)/(\d+)
+      to: rewritten?var1=$1&var2=$2
+      # skipRemainingRules: false
+
+    redirect:
+    - from: redirect-rule/(.*)
+      to: redirected/$1
+
+    endpoints:
+
+    # home, file content
+    - route: /
+      file:
+        path: Content/index.html
+      contentType: text/html
+      filters:
+      - name: markdown
+
+    # static files
+    - route: /static
+      files:
+        path: wwwroot
+
+    # plain text responses
+    - route: /plaintext
+      body: <h1>Hello World<h1>
+      contentType: text/html
+      rateLimit:
+        policy: nottoofast
+    
+    # json responses
+    - route: /json
+      body: '{ message: "Hello world" }'
+      contentType: application/json
+
+    # file result
+    - route: /favicon.ico
+      contentType: image/x-icon
+      file:
+        path: wwwroot/favicon.ico
+
+    # template responses
+    - route: /markdown
+      redirect: /markdown/1
+
+    - route: /markdown/{counter:int}
+      body: |
+        Hello 
+        {% for i in (1..counter) %} 
+        - {{ i }}
+        {% endfor %}
+        {{ 'now' | date: '%c' }}
+      contentType: text/html
+      filters:
+      - name: liquid
+      - name: markdown
+      cache:
+        enabled: true
+        #duration: 3 # settings can be inlined, or from a shared policy
+        policy: long
+    
+    responseCompression:
+      enabled: true
+
+  - bind:
+    - address: localhost:8080
+    
+    # protocols: http3 # defaults to http1 and http2
+    # certificate:
+
+    endpoints:
+    - route: /
+      body: <h1>Proxies<h1>
+      contentType: text/html
+
+    - route: /google
+      proxy:
+        destination: https://www.google.com
+
+    - route: /microsoft
+      proxy:
+        destination: https://www.microsoft.com/en-us
+        # removePrefix: false
+
+cachePolicies:
+  - name: long
+    duration: 5s
+
+rateLimitPolicies:
+  - name: nottoofast
+    duration: 5s
+    permit: 3
+    #queue: 1
+
+certificates:
+  - name: testCert
+    path: testCert.pfx
+    password: testPassword
+
+letsEncrypt:
+  path: ./.certificates
+  email: youremail@microsoft.com
+  domains: 
+  - yourdomain.com

@@ -285,3 +285,7 @@ __pycache__/
 *.btm.cs
 *.odx.cs
 *.xsd.cs
+
+# Let's encrypt certificates from Demo
+
+.certificates/
