@@ -7,9 +7,9 @@ public class ConfigurationSection
 
     public ServerSection[] Servers { get; set; } = Array.Empty<ServerSection>();
 
-    public CachePolicySection[] CachePolicies { get; set; } = Array.Empty<CachePolicySection>();
+    public List<CachePolicySection> CachePolicies { get; set; } = new();
 
-    public RateLimitPolicySection[] RateLimitPolicies { get; set; } = Array.Empty<RateLimitPolicySection>();
+    public List<RateLimitPolicySection> RateLimitPolicies { get; set; } = new();
 
     public CertificateSection[] Certificates { get; set; } = Array.Empty<CertificateSection>();
 

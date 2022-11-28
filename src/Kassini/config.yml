@@ -66,7 +66,7 @@
         {% for i in (1..counter) %} 
         - {{ i }}
         {% endfor %}
-        {{ 'now' | date: '%c' }}
+        {{ 'now' | date: '%c%z' }}
       contentType: text/html
       filters:
       - name: liquid
@@ -76,8 +76,39 @@
         #duration: 3 # settings can be inlined, or from a shared policy
         policy: long
     
+    # template responses
+    - route: /method
+      body: From GET
+
+    - route: /method
+      body: From POST
+      methods: post
+
     responseCompression:
       enabled: true
+
+  - bind:
+    - address: localhost:81
+    
+    # example of an endpoint group
+    # cache is applied on all endpoints
+    endpoints:
+    - route: /*
+      cache:
+        duration: 2s
+
+    - route: /test/{counter:int}
+      body: |
+        {{ counter }} {{ 'now' | date: '%c' }}
+      contentType: text/html
+      filters:
+      - name: liquid
+    
+    - route: /monster
+      body: '<img src="https://www.gravatar.com/avatar/{{ "now" | date: "%s%j" }}?s=200&d=monsterid"/>'
+      contentType: text/html
+      filters:
+      - name: liquid
 
   - bind:
     - address: localhost:8080

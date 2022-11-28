@@ -8,6 +8,8 @@ using System.Net;
 using Yarp.ReverseProxy.Configuration;
 using LettuceEncrypt;
 using Microsoft.AspNetCore.Rewrite;
+using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Builder;
 
 // Load configuration from arguments
 
@@ -138,6 +140,25 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
 
     if (hasCachedRoutes)
     {
+        // Create inline policies
+        foreach (var endpoint in server.Endpoints)
+        {
+            var cacheSection = endpoint.Cache;
+
+            if (cacheSection == null || cacheSection.Policy != null)
+            {
+                continue;
+            }
+
+            cacheSection.Policy = Guid.NewGuid().ToString("n");
+
+            configurationSource.ConfigurationSection.CachePolicies.Add(new CachePolicySection
+            {
+                Name = cacheSection.Policy,
+                Duration = cacheSection.Duration,
+            });
+        }
+
         builder.Services.AddOutputCache(options =>
         {
             // Pre-defined policies
@@ -145,22 +166,7 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
             {
                 options.AddPolicy(cacheSection.Name, builder => CreateCachePolicy(builder, cacheSection));
             }
-
-            // Inline policies
-            foreach (var endpoint in server.Endpoints)
-            {
-                var cacheSection = endpoint.Cache;
-
-                if (cacheSection == null || cacheSection.Policy != null)
-                {
-                    continue;
-                }
-
-                cacheSection.Policy = Guid.NewGuid().ToString("n");
-
-                options.AddPolicy(cacheSection.Policy, builder => CreateCachePolicy(builder, cacheSection));
-            }
-
+            
             void CreateCachePolicy(OutputCachePolicyBuilder builder, CacheSettings settings)
             {
                 builder.Expire(settings.GetDuration());
@@ -170,27 +176,31 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
 
     if (hasRateLimitedRoutes)
     {
+        // Create inline policies
+        foreach (var endpoint in server.Endpoints)
+        {
+            var rateLimitPolicySection = endpoint.RateLimit;
+
+            if (rateLimitPolicySection == null || rateLimitPolicySection.Policy != null)
+            {
+                continue;
+            }
+
+            rateLimitPolicySection.Policy = Guid.NewGuid().ToString("n");
+
+            configurationSource.ConfigurationSection.RateLimitPolicies.Add(new RateLimitPolicySection
+            {
+                Name = rateLimitPolicySection.Policy,
+                Duration = rateLimitPolicySection.Duration,
+            });
+        }
+
         builder.Services.AddRateLimiter(options =>
         {
             // Pre-defined policies
             foreach (var rateLimitPolicySection in configurationSource.ConfigurationSection.RateLimitPolicies)
             {
                 options.AddPolicy(rateLimitPolicySection.Name, httpContext => CreateRateLimit(rateLimitPolicySection, httpContext));
-            }
-
-            // Inline policies
-            foreach (var endpoint in server.Endpoints)
-            {
-                var rateLimitPolicySection = endpoint.RateLimit;
-
-                if (rateLimitPolicySection == null || rateLimitPolicySection.Policy != null)
-                {
-                    continue;
-                }
-
-                rateLimitPolicySection.Policy = Guid.NewGuid().ToString("n");
-
-                options.AddPolicy(rateLimitPolicySection.Policy, httpContext => CreateRateLimit(rateLimitPolicySection, httpContext));
             }
 
             RateLimitPartition<string> CreateRateLimit(RateLimitSettings settings, HttpContext httpContext)
@@ -323,6 +333,28 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
         app.UseResponseCompression();
     }
 
+    Dictionary<string, IEndpointRouteBuilder> endpointGroups = new();
+
+    // Process all route groups (Route ends with '/*')
+    foreach (var endpoint in server.Endpoints)
+    {
+        if (endpoint.Route == null || !endpoint.Route.EndsWith("/*"))
+        {
+            continue;
+        }
+
+        var newRoute = endpoint.Route[..^2];
+
+        if (newRoute == "")
+        {
+            newRoute = "/";
+        }
+
+        var routeGroupBuilder = app.MapGroup(newRoute);
+
+        endpointGroups[newRoute] = routeGroupBuilder;
+    }
+
     foreach (var endpoint in server.Endpoints)
     {
         if (endpoint.Route == null)
@@ -330,47 +362,59 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
             throw new NotSupportedException("Route not defined for endpoint");
         }
 
-        RouteHandlerBuilder routeHandlerBuilder;
+        IEndpointRouteBuilder routeGroupBuilder = app;
+        IEndpointConventionBuilder? routeHandlerBuilder = null;
 
-        if (endpoint.Body != null)
+        foreach (var group in endpointGroups)
         {
-            routeHandlerBuilder = app.MapGet(endpoint.Route, () => TypedResults.Content(endpoint.Body, endpoint.ContentType));
+            if (endpoint.Route.StartsWith(group.Key, StringComparison.OrdinalIgnoreCase))
+            {
+                routeGroupBuilder = group.Value;
+            }
         }
-        else if (endpoint.File != null && endpoint.File.Path != null)
+
+        if (!endpoint.Route.EndsWith("/*"))
         {
-            var content = File.ReadAllBytes(endpoint.File.Path);
-            routeHandlerBuilder = app.MapGet(endpoint.Route, () => TypedResults.Bytes(content, endpoint.ContentType));
-        }
-        else if (endpoint.Redirect != null)
-        {
-            routeHandlerBuilder = app.MapGet(endpoint.Route, () => TypedResults.Redirect(endpoint.Redirect));
-        }
-        else if (endpoint.Files != null)
-        {
-            var filesPath = Path.Combine(builder.Environment.ContentRootPath, endpoint.Files.Path ?? "");
-            app.UseStaticFiles(new StaticFileOptions() { RequestPath = endpoint.Route, FileProvider = new PhysicalFileProvider(filesPath) });
-            continue;
-        }
-        else if (endpoint.Proxy != null)
-        {
-            // Proxied routes are configured using Yarp's configuration model
-            // TODO:
-            // - How to add Rate limiting or Output caching to these routes?
-            continue;
+            if (endpoint.Body != null)
+            {
+                routeHandlerBuilder = routeGroupBuilder.MapMethods(endpoint.Route, endpoint.GetMethods(), () => TypedResults.Content(endpoint.Body, endpoint.ContentType));
+            }
+            else if (endpoint.File != null && endpoint.File.Path != null)
+            {
+                var content = File.ReadAllBytes(endpoint.File.Path);
+                routeHandlerBuilder = routeGroupBuilder.MapMethods(endpoint.Route, endpoint.GetMethods(), () => TypedResults.Bytes(content, endpoint.ContentType));
+            }
+            else if (endpoint.Redirect != null)
+            {
+                routeHandlerBuilder = routeGroupBuilder.MapMethods(endpoint.Route, endpoint.GetMethods(), () => TypedResults.Redirect(endpoint.Redirect));
+            }
+            else if (endpoint.Files != null)
+            {
+                var filesPath = Path.Combine(builder.Environment.ContentRootPath, endpoint.Files.Path ?? "");
+                app.UseStaticFiles(new StaticFileOptions() { RequestPath = endpoint.Route, FileProvider = new PhysicalFileProvider(filesPath) });
+                continue;
+            }
+            else if (endpoint.Proxy != null)
+            {
+                // Proxied routes are configured using Yarp's configuration model
+                // TODO:
+                // - How to add Rate limiting or Output caching to these routes?
+                continue;
+            }
         }
         else
         {
-            continue;
+            routeHandlerBuilder = (RouteGroupBuilder)routeGroupBuilder;
         }
 
         if (endpoint.Status != null)
         {
-            routeHandlerBuilder = routeHandlerBuilder.AddEndpointFilter(new StatusCodeFilter(endpoint.Status.Value));
+            routeHandlerBuilder = routeHandlerBuilder!.AddEndpointFilter(new StatusCodeFilter(endpoint.Status.Value));
         }
 
         if (endpoint.Headers != null)
         {
-            routeHandlerBuilder = routeHandlerBuilder.AddEndpointFilter(new HeadersFilter(endpoint.Headers));
+            routeHandlerBuilder = routeHandlerBuilder!.AddEndpointFilter(new HeadersFilter(endpoint.Headers));
         }
 
         if (endpoint.Filters.Any())
@@ -386,17 +430,17 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
                 filters.Add(factory(filter));
             }
 
-            routeHandlerBuilder.AddEndpointFilter(new FiltersEndpointFilter(filters.ToArray()));
+            routeHandlerBuilder!.AddEndpointFilter(new FiltersEndpointFilter(filters.ToArray()));
         }
 
         if (endpoint.Cache != null && endpoint.Cache.Enabled && endpoint.Cache.Policy != null)
         {
-            routeHandlerBuilder = routeHandlerBuilder.CacheOutput(endpoint.Cache.Policy);
+            routeHandlerBuilder = routeHandlerBuilder!.CacheOutput(endpoint.Cache.Policy);
         }
 
         if (endpoint.RateLimit != null && endpoint.RateLimit.Enabled && endpoint.RateLimit.Policy != null)
         {
-            routeHandlerBuilder = routeHandlerBuilder.RequireRateLimiting(endpoint.RateLimit.Policy);
+            routeHandlerBuilder = routeHandlerBuilder!.RequireRateLimiting(endpoint.RateLimit.Policy);
         }
     }
 

@@ -6,6 +6,8 @@ public class EndpointSection
 {
     public string? Route { get; set; } = null;
 
+    public string? Group { get; set; } = null;
+
     // Response headers
     public Dictionary<string, string>? Headers { get; set; } = null;
 
@@ -38,4 +40,9 @@ public class EndpointSection
 
     // Redirection
     public string? Redirect { get; set; } = null;
+
+    // Method 
+    public string Methods { get; set; } = "GET";
+
+    public string[] GetMethods() => Methods.Split(' ', ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }
