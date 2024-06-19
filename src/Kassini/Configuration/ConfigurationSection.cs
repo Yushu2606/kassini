@@ -3,15 +3,15 @@
 public class ConfigurationSection
 {
     private Dictionary<string, CachePolicySection>? _cachePolicies;
-    private Dictionary<string, RateLimitPolicySection>? _rateLimitpolicies;
+    private Dictionary<string, RateLimitPolicySection>? _rateLimitPolicies;
 
-    public ServerSection[] Servers { get; set; } = Array.Empty<ServerSection>();
+    public ServerSection[] Servers { get; set; } = [];
 
-    public List<CachePolicySection> CachePolicies { get; set; } = new();
+    public List<CachePolicySection> CachePolicies { get; set; } = [];
 
-    public List<RateLimitPolicySection> RateLimitPolicies { get; set; } = new();
+    public List<RateLimitPolicySection> RateLimitPolicies { get; set; } = [];
 
-    public CertificateSection[] Certificates { get; set; } = Array.Empty<CertificateSection>();
+    public CertificateSection[] Certificates { get; set; } = [];
 
     public LetsEncryptSection? LetsEncrypt { get; set; } = null;
 
@@ -26,9 +26,9 @@ public class ConfigurationSection
 
     public RateLimitSettings? GetRateLimitPolicy(string name)
     {
-        _rateLimitpolicies ??= RateLimitPolicies.ToDictionary(p => p.Name, p => p);
+        _rateLimitPolicies ??= RateLimitPolicies.ToDictionary(p => p.Name, p => p);
 
-        _rateLimitpolicies.TryGetValue(name, out var policy);
+        _rateLimitPolicies.TryGetValue(name, out var policy);
 
         return policy;
     }

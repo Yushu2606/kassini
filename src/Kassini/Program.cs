@@ -1,24 +1,17 @@
 using Kassini.Configuration;
-using Kassini.Filters;
+using LettuceEncrypt;
 using Microsoft.AspNetCore.OutputCaching;
+using Microsoft.AspNetCore.Rewrite;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.FileProviders;
-using System.Threading.RateLimiting;
 using System.Net;
+using System.Threading.RateLimiting;
 using Yarp.ReverseProxy.Configuration;
-using LettuceEncrypt;
-using Microsoft.AspNetCore.Rewrite;
-using Microsoft.Extensions.Options;
-using Microsoft.AspNetCore.Builder;
 
 // Load configuration from arguments
 
 var configFilePath = args.Length > 0 ? args[0] : "config.yml";
 var configurationSource = ConfigurationSource.Parse(configFilePath);
-
-var filtersFactory = new Dictionary<string, Func<FilterSection, IBodyFilter>>();
-MarkdownFilter.Register(filtersFactory);
-LiquidFilter.Register(filtersFactory);
 
 // TODO: Validation
 // - File paths should exist
@@ -31,7 +24,7 @@ var webApplications = new List<WebApplication>();
 
 foreach (var server in configurationSource.ConfigurationSection.Servers)
 {
-    var builder = WebApplication.CreateBuilder(args);
+    var builder = WebApplication.CreateBuilder();
 
     var hasCachedRoutes = false;
     var hasRateLimitedRoutes = false;
@@ -93,7 +86,7 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
                 RouteId = routeId,
                 ClusterId = clusterId,
                 Match = new RouteMatch { Path = pattern }, // , Hosts = server.Hosts.Select(x => x.ToString()).ToArray()
-                Transforms = new List<IReadOnlyDictionary<string, string>> { transforms }
+                Transforms = [transforms]
             };
 
             // {**catch-all}, 
@@ -106,7 +99,7 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
             clusters.Add(cluster);
         }
     }
-    
+
     if (letsEncrypt != null && letsEncrypt.Email != null && letsEncrypt.Domains.Any() && server.Bind.Any(x => x.Certificate == "letsencrypt"))
     {
         builder.Services.AddLettuceEncrypt(options =>
@@ -121,7 +114,7 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
 
     if (server.HttpsRedirection != null && server.HttpsRedirection.Enabled)
     {
-        builder.Services.AddHttpsRedirection(options => 
+        builder.Services.AddHttpsRedirection(options =>
         {
             options.RedirectStatusCode = StatusCodes.Status307TemporaryRedirect;
             options.HttpsPort = server.HttpsRedirection.Port ?? 443;
@@ -166,7 +159,7 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
             {
                 options.AddPolicy(cacheSection.Name, builder => CreateCachePolicy(builder, cacheSection));
             }
-            
+
             void CreateCachePolicy(OutputCachePolicyBuilder builder, CacheSettings settings)
             {
                 builder.Expire(settings.GetDuration());
@@ -231,7 +224,7 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
     {
         // Default to http1 and http2 if no protocols are specified
         var protocols = HttpProtocols.Http1AndHttp2;
-        
+
         foreach (var bind in server.Bind)
         {
             if (bind.Protocols.Any())
@@ -249,8 +242,10 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
 
             var address = IPAddress.Any;
             var port = 80;
-            var parts = bind.Address?.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.RemoveEmptyEntries);
-            
+
+            // [address][:port(80)]
+            var parts = bind.Address?.Split(':', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.RemoveEmptyEntries);
+
             switch (parts?.Length)
             {
                 case 1: if (!int.TryParse(parts[0], out port)) IPAddress.TryParse(parts[0], out address); port = 80; break;
@@ -270,10 +265,16 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
                             https.UseLettuceEncrypt(options.ApplicationServices);
                         });
                     }
+                    if (bind.Certificate == "dev")
+                    {
+                        listenOptions.UseHttps(https =>
+                        {
+                        });
+                    }
                     else
                     {
                         var certificate = configurationSource.ConfigurationSection.Certificates.First(x => x.Name == bind.Certificate);
-                        if (certificate.Path != null)
+                        if (!string.IsNullOrWhiteSpace(certificate.Path))
                         {
                             listenOptions.UseHttps(certificate.Path, certificate.Password);
                         }
@@ -290,7 +291,7 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
         app.UseHttpsRedirection();
     }
 
-    if (server.Redirect.Any() || server.Rewrite.Any()) 
+    if (server.Redirect.Any() || server.Rewrite.Any())
     {
         var options = new RewriteOptions();
         foreach (var redirect in server.Redirect)
@@ -333,7 +334,7 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
         app.UseResponseCompression();
     }
 
-    Dictionary<string, IEndpointRouteBuilder> endpointGroups = new();
+    Dictionary<string, IEndpointRouteBuilder> endpointGroups = [];
 
     // Process all route groups (Route ends with '/*')
     foreach (var endpoint in server.Endpoints)
@@ -381,6 +382,7 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
             }
             else if (endpoint.File != null && endpoint.File.Path != null)
             {
+                // Just for demonstrations purpose, not production-ready
                 var content = File.ReadAllBytes(endpoint.File.Path);
                 routeHandlerBuilder = routeGroupBuilder.MapMethods(endpoint.Route, endpoint.GetMethods(), () => TypedResults.Bytes(content, endpoint.ContentType));
             }
@@ -417,22 +419,6 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
             routeHandlerBuilder = routeHandlerBuilder!.AddEndpointFilter(new HeadersFilter(endpoint.Headers));
         }
 
-        if (endpoint.Filters.Any())
-        {
-            var filters = new List<IBodyFilter>();
-            foreach (var filter in endpoint.Filters)
-            {
-                if (filter == null || filter.Name == null || !filtersFactory.TryGetValue(filter.Name, out var factory))
-                {
-                    continue;
-                }
-
-                filters.Add(factory(filter));
-            }
-
-            routeHandlerBuilder!.AddEndpointFilter(new FiltersEndpointFilter(filters.ToArray()));
-        }
-
         if (endpoint.Cache != null && endpoint.Cache.Enabled && endpoint.Cache.Policy != null)
         {
             routeHandlerBuilder = routeHandlerBuilder!.CacheOutput(endpoint.Cache.Policy);
@@ -448,93 +434,3 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
 }
 
 Task.WaitAll(webApplications.Select(x => x.RunAsync()).ToArray());
-
-class StatusCodeFilter : IEndpointFilter
-{
-    private readonly int _statusCode;
-
-    public StatusCodeFilter(int statusCode)
-    {
-        _statusCode = statusCode;
-    }
-
-    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
-    {
-        var result = await next(context);
-
-        context.HttpContext.Response.StatusCode = _statusCode;
-
-        return result;
-    }
-}
-
-class HeadersFilter : IEndpointFilter
-{
-    private readonly Dictionary<string, string> _headers;
-
-    public HeadersFilter(Dictionary<string, string> headers)
-    {
-        _headers = headers;
-    }
-
-    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
-    {
-        var result = await next(context);
-
-        var responseHeaders = context.HttpContext.Response.Headers;
-
-        foreach (var header in _headers)
-        {
-            responseHeaders[header.Key] = header.Value;
-        }
-
-        return result;
-    }
-}
-
-class FiltersEndpointFilter : IEndpointFilter
-{
-    private readonly IBodyFilter[] _filters;
-
-    public FiltersEndpointFilter(IBodyFilter[] filters)
-    {
-        _filters = filters;
-    }
-
-    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
-    {
-        var body = context.HttpContext.Response.Body;
-        var dummy = new MemoryStream();
-        context.HttpContext.Response.Body = dummy;
-
-        var result = await next(context) as IResult;
-        if (result != null) 
-        {
-            await result.ExecuteAsync(context.HttpContext);
-        }
-
-        context.HttpContext.Response.Body = body;
-
-        string? content = null;
-
-        dummy.Seek(0, SeekOrigin.Begin);
-        using (var reader = new StreamReader(dummy))
-        {
-            content = reader.ReadToEnd();
-        }
-
-        foreach (var filter in _filters)
-        {
-            if (filter != null && content != null)
-            {
-                content = await filter.FilterAsync(content, context.HttpContext.Request.RouteValues);
-            }
-        }
-
-        result = TypedResults.Content(content);
-
-        dummy.Dispose();
-
-        return result;
-    }    
-}

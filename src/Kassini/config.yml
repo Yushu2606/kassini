@@ -1,15 +1,17 @@
 ﻿servers:
 
+  # Server that listens on 443/80
   - bind:
     - address: '*:443'
-      # certificate: letsencrypt
-      certificate: testCert
+      # certificate can be a section name, 'letsencrypt', or 'dev'
+      certificate: dev
       protocols:
       - http2
     - address: '*:80'
       protocols:
       - http1
 
+    # Optional HTTPS redirection
     httpsRedirection:
         enabled: false
         # port: 443
@@ -25,58 +27,40 @@
 
     endpoints:
 
-    # home, file content
+    # File-content mapping
     - route: /
       file:
         path: Content/index.html
       contentType: text/html
-      filters:
-      - name: markdown
 
-    # static files
+    # Static files middleware mapping
     - route: /static
       files:
         path: wwwroot
 
-    # plain text responses
+    # Raw content responses
     - route: /plaintext
       body: <h1>Hello World<h1>
       contentType: text/html
       rateLimit:
         policy: nottoofast
     
-    # json responses
+    # Custom response Content Type 
     - route: /json
       body: '{ message: "Hello world" }'
       contentType: application/json
 
-    # file result
+    # File content result
     - route: /favicon.ico
       contentType: image/x-icon
       file:
         path: wwwroot/favicon.ico
 
-    # template responses
+    # Redirections
     - route: /markdown
       redirect: /markdown/1
 
-    - route: /markdown/{counter:int}
-      body: |
-        Hello 
-        {% for i in (1..counter) %} 
-        - {{ i }}
-        {% endfor %}
-        {{ 'now' | date: '%c%z' }}
-      contentType: text/html
-      filters:
-      - name: liquid
-      - name: markdown
-      cache:
-        enabled: true
-        #duration: 3 # settings can be inlined, or from a shared policy
-        policy: long
-    
-    # template responses
+    # Verb mapping
     - route: /method
       body: From GET
 
@@ -87,29 +71,23 @@
     responseCompression:
       enabled: true
 
+  # Server that listens on 81, shows caching and endpoint groups
   - bind:
     - address: localhost:81
     
-    # example of an endpoint group
-    # cache is applied on all endpoints
+    # Example of an endpoint group where output caching is applied on all endpoints
     endpoints:
     - route: /*
       cache:
         duration: 2s
+        # Cache settings can be inlined, or from a shared policy
+        policy: long
 
-    - route: /test/{counter:int}
-      body: |
-        {{ counter }} {{ 'now' | date: '%c' }}
-      contentType: text/html
-      filters:
-      - name: liquid
-    
     - route: /monster
-      body: '<img src="https://www.gravatar.com/avatar/{{ "now" | date: "%s%j" }}?s=200&d=monsterid"/>'
+      body: '<img src="https://www.gravatar.com/avatar/abcde?s=200&d=monsterid"/>'
       contentType: text/html
-      filters:
-      - name: liquid
 
+  # Server that listens on 8080 and proxies /google and /microsoft to external domains
   - bind:
     - address: localhost:8080
     
@@ -128,7 +106,9 @@
     - route: /microsoft
       proxy:
         destination: https://www.microsoft.com/en-us
-        # removePrefix: false
+        # There is a custom "transform" to remove the prefix (/microsoft) from the
+        # proxied requests
+        # removePrefix: false 
 
 cachePolicies:
   - name: long

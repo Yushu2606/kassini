@@ -27,7 +27,7 @@ public class EndpointSection
     public FileSection? File { get; set; } = null;
 
     // Filters
-    public FilterSection[] Filters { get; set; } = Array.Empty<FilterSection>();
+    public FilterSection[] Filters { get; set; } = [];
 
     // Proxy
     public ProxySection? Proxy { get; set; } = null;
