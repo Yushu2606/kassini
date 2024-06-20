@@ -109,7 +109,27 @@
         # There is a custom "transform" to remove the prefix (/microsoft) from the
         # proxied requests
         # removePrefix: false 
-
+  
+  # Custom Reverse Proxy configuration
+  - bind:
+    - address: localhost:8081
+  
+    # c.f. https://microsoft.github.io/reverse-proxy/articles/config-files.html
+    reverseProxy: 
+      routes:
+        - routeId: route1
+          clusterId: cluster1
+          match:
+            path: "{**catch-all}"
+            # hosts:
+            #   - www.aaaaa.com
+            #   - www.bbbbb.com
+      clusters:
+        - clusterId: cluster1
+          destinations:
+            cluster1/destination1:
+              address: https://example.com/
+  
 cachePolicies:
   - name: long
     duration: 5s

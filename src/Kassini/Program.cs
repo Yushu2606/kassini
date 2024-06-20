@@ -29,8 +29,10 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
     var hasCachedRoutes = false;
     var hasRateLimitedRoutes = false;
     var hasProxiedRoutes = false;
+
     var letsEncrypt = configurationSource.ConfigurationSection.LetsEncrypt;
 
+    // Yarp's configuration is imported from each endpoint's proxy property and also the server's reverseProxy one
     var routes = new List<RouteConfig>();
     var clusters = new List<ClusterConfig>();
 
@@ -100,6 +102,12 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
         }
     }
 
+    if (server.ReverseProxy != null)
+    {
+        routes.AddRange(server.ReverseProxy.Routes);
+        clusters.AddRange(server.ReverseProxy.Clusters);
+    }
+
     if (letsEncrypt != null && letsEncrypt.Email != null && letsEncrypt.Domains.Any() && server.Bind.Any(x => x.Certificate == "letsencrypt"))
     {
         builder.Services.AddLettuceEncrypt(options =>
@@ -126,7 +134,7 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
         builder.Services.AddResponseCompression();
     }
 
-    if (hasProxiedRoutes)
+    if (hasProxiedRoutes || server.ReverseProxy != null)
     {
         builder.Services.AddReverseProxy().LoadFromMemory(routes, clusters);
     }

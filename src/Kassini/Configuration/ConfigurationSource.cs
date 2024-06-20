@@ -21,7 +21,10 @@ public class ConfigurationSource
     public static ConfigurationSource Parse(Stream sourceStream)
     {
         using var streamReader = new StreamReader(sourceStream);
-        var deserializer = new DeserializerBuilder().WithNamingConvention(CamelCaseNamingConvention.Instance).IgnoreUnmatchedProperties().Build();
+        var deserializer = new DeserializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .WithNodeTypeResolver(new ReadOnlyCollectionNodeTypeResolver())
+            .IgnoreUnmatchedProperties().Build();
         var configurationSection = deserializer.Deserialize<ConfigurationSection>(streamReader);
 
         return new ConfigurationSource(configurationSection); 
