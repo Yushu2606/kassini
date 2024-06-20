@@ -12,7 +12,7 @@ using Yarp.ReverseProxy.Configuration;
 
 // Load configuration from arguments
 
-var configFilePath = args.Length > 0 ? args[0] : "config.yml";
+var configFilePath = args.Length > 0 ? args[0] : "simple.yml";
 var configurationSource = ConfigurationSource.Parse(configFilePath);
 
 // TODO: Validation
@@ -402,8 +402,7 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
             else if (endpoint.File != null && endpoint.File.Path != null)
             {
                 // Just for demonstrations purpose, not production-ready
-                var content = File.ReadAllBytes(endpoint.File.Path);
-                routeHandlerBuilder = routeGroupBuilder.MapMethods(endpoint.Route, endpoint.GetMethods(), () => TypedResults.Bytes(content, endpoint.ContentType));
+                routeHandlerBuilder = routeGroupBuilder.MapMethods(endpoint.Route, endpoint.GetMethods(), () => TypedResults.PhysicalFile(Path.GetFullPath(endpoint.File.Path), endpoint.ContentType));
             }
             else if (endpoint.Redirect != null)
             {

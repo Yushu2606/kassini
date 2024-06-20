@@ -1,0 +1,10 @@
+﻿servers:
+
+  - bind:
+    - address: '*:8084'
+      protocols:
+      - http1
+
+    - route: /
+      body: <h1>Hello World<h1>
+      contentType: text/html
