@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.Rewrite;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.FileProviders;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using System.Net;
 using System.Threading.RateLimiting;
 using Yarp.ReverseProxy.Configuration;
@@ -227,6 +229,15 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
             }
         });
     }
+
+    builder.Services.AddOpenTelemetry()
+        .ConfigureResource(resource => resource.AddService("yarpProxy"))
+        .WithTracing(tracing => tracing
+            .AddAspNetCoreInstrumentation()
+            .AddHttpClientInstrumentation()
+            .AddSource("Yarp.ReverseProxy")
+            .AddOtlpExporter()
+            );
 
     builder.WebHost.ConfigureKestrel((context, options) =>
     {
