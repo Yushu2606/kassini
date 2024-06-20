@@ -10,3 +10,7 @@
     - route: /
       body: <h1>Hello World<h1>
       contentType: text/html
+
+    - route: /microsoft
+      proxy:
+        destination: https://www.microsoft.com/en-us

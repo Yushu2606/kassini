@@ -19,5 +19,5 @@ COPY --from=build-env /root/.dotnet/corefx/cryptography/x509stores/my/* /root/.d
 WORKDIR /App
 COPY --from=build-env /App/out .
 
-# The ./cfg/config.yml is bound to a host file
-ENTRYPOINT ["dotnet", "yarp.dll", "./cfg/config.yml"]
+# The /etc/kassini/config.yml is bound to a host file
+ENTRYPOINT ["dotnet", "yarp.dll", "/etc/kassini/config.yml"]

@@ -7,4 +7,4 @@ param(
     [string]$name
 ) 
 
-docker run --name ${name} -d --network=host -v "${config}:/App/cfg/config.yml" kassini/yarp:latest
+docker run --name ${name} -d -p 8084:8084 -v "${config}:/etc/kassini/config.yml" kassini/yarp:latest
