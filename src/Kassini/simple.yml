@@ -5,6 +5,8 @@
       protocols:
       - http1
 
+    endpoints:
+    
     - route: /
       body: <h1>Hello World<h1>
       contentType: text/html
