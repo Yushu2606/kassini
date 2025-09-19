@@ -3,10 +3,8 @@ using LettuceEncrypt;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.Rewrite;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
-using Microsoft.Extensions.Hosting;
-using OpenTelemetry.Resources;
-using OpenTelemetry.Trace;
 using System.Net;
 using System.Threading.RateLimiting;
 using Yarp.ReverseProxy.Configuration;
@@ -414,7 +412,20 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
             else if (endpoint.Files != null)
             {
                 var filesPath = Path.Combine(builder.Environment.ContentRootPath, endpoint.Files.Path ?? "");
-                app.UseStaticFiles(new StaticFileOptions() { RequestPath = endpoint.Route, FileProvider = new PhysicalFileProvider(filesPath) });
+
+                var contentTypeProvider = new FileExtensionContentTypeProvider();
+
+                if (endpoint.Files.MimeTypes != null && endpoint.Files.MimeTypes.Count != 0)
+                {
+                    contentTypeProvider = new();
+
+                    foreach (var contentType in endpoint.Files.MimeTypes)
+                    {
+                        contentTypeProvider.Mappings[contentType.Key] = contentType.Value;
+                    }
+                }
+
+                app.UseStaticFiles(new StaticFileOptions() { RequestPath = endpoint.Route, FileProvider = new PhysicalFileProvider(filesPath), ContentTypeProvider = contentTypeProvider });
                 continue;
             }
             else if (endpoint.Proxy != null)

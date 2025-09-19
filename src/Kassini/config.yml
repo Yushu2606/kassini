@@ -37,6 +37,8 @@
     - route: /static
       files:
         path: wwwroot
+        mimeTypes: # Optional custom MIME types
+          .cast: application/x-cast
 
     # Raw content responses
     - route: /plaintext
