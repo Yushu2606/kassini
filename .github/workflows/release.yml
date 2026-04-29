@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  release:
+    types: [ created ]
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-latest
+    outputs:
+      matches: ${{ steps.version.outputs.matches }}
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+    - name: Validate release tag
+      id: version
+      env:
+        TAG_NAME: ${{ github.event.release.tag_name }}
+      run: |
+        if [[ "$TAG_NAME" == v*.*.* ]]; then
+          echo "matches=true" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG_NAME#v}" >> "$GITHUB_OUTPUT"
+        else
+          echo "matches=false" >> "$GITHUB_OUTPUT"
+          echo "Release tag '$TAG_NAME' does not match v*.*.*; skipping."
+        fi
+
+  test:
+    name: test
+    needs: prepare
+    if: needs.prepare.outputs.matches == 'true'
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Test
+      run: dotnet test --solution src/Kassini.sln --configuration Release
+
+  publish:
+    name: publish (${{ matrix.rid }})
+    needs: [ prepare, test ]
+    if: needs.prepare.outputs.matches == 'true' && needs.test.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - rid: win-x64
+          executable: kassini.exe
+          archive: zip
+        - rid: win-arm64
+          executable: kassini.exe
+          archive: zip
+        - rid: linux-x64
+          executable: kassini
+          archive: tar.gz
+        - rid: linux-arm64
+          executable: kassini
+          archive: tar.gz
+        - rid: osx-x64
+          executable: kassini
+          archive: tar.gz
+        - rid: osx-arm64
+          executable: kassini
+          archive: tar.gz
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+
+    - name: Publish
+      run: |
+        dotnet publish ./src/Kassini/Kassini.csproj \
+          --configuration Release \
+          --runtime ${{ matrix.rid }} \
+          --self-contained true \
+          --output artifacts/${{ matrix.rid }} \
+          -p:Version=${{ needs.prepare.outputs.version }} \
+          -p:ContinuousIntegrationBuild=true
+
+    - name: Package
+      id: package
+      env:
+        RID: ${{ matrix.rid }}
+        EXECUTABLE: ${{ matrix.executable }}
+        ARCHIVE: ${{ matrix.archive }}
+        TAG_NAME: ${{ needs.prepare.outputs.tag }}
+      run: |
+        mkdir -p upload
+        asset="kassini-${TAG_NAME}-${RID}.${ARCHIVE}"
+
+        if [[ "$ARCHIVE" == "zip" ]]; then
+          (cd "artifacts/$RID" && zip -9 "../../upload/$asset" "$EXECUTABLE")
+        else
+          tar -czf "upload/$asset" -C "artifacts/$RID" "$EXECUTABLE"
+        fi
+
+        echo "asset=upload/$asset" >> "$GITHUB_OUTPUT"
+
+    - name: Upload release asset
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: gh release upload "${{ needs.prepare.outputs.tag }}" "${{ steps.package.outputs.asset }}" --clobber --repo "$GITHUB_REPOSITORY"

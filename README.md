@@ -10,12 +10,14 @@ Pass the configuration file path as the first argument. If no argument is provid
 dotnet run --project src/Kassini -- src/Kassini/simple.yml
 ```
 
-Published builds use the `kassini` executable name:
+Published single-file builds use the `kassini` executable name:
 
 ```console
 ./.artifacts/linux-x64/kassini ./config.yml
 .\.artifacts\win-x64\kassini.exe .\config.yml
 ```
+
+Creating a GitHub Release with a tag matching `v*.*.*` publishes single-file release assets for Windows, Linux, and macOS on x64 and arm64. Windows assets are `.zip` files; Linux and macOS assets are `.tar.gz` files.
 
 Build and run the Docker image locally:
 
