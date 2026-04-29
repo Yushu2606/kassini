@@ -1,16 +1,15 @@
 ﻿servers:
+- bind:
+  - address: '*:8084'
+    protocols:
+    - http1
 
-  - bind:
-    - address: '*:8084'
-      protocols:
-      - http1
-
-    endpoints:
+  endpoints:
     
-    - route: /
-      body: <h1>Hello World<h1>
-      contentType: text/html
+  - route: /
+    body: <h1>Hello World<h1>
+    contentType: text/html
 
-    - route: /microsoft
-      proxy:
-        destination: https://www.microsoft.com/en-us
+  - route: /microsoft
+    proxy:
+      destination: https://www.microsoft.com/en-us

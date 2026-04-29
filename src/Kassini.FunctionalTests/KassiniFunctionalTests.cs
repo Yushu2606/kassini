@@ -432,6 +432,192 @@ public sealed class KassiniFunctionalTests
         RequireEqual("upstream:/reverse/path?x=1", await response.Content.ReadAsStringAsync());
     }
 
+    [Test]
+    public async Task BrowserTokenAuthenticationProtectsEndpointsAndAcceptsConfiguredToken()
+    {
+        var port = GetFreePort();
+        var config = $$"""
+            servers:
+            - bind:
+              - address: 127.0.0.1:{{port}}
+              endpoints:
+              - route: /public
+                body: Public response
+                contentType: text/plain
+              - route: /profile
+                body: Protected response
+                contentType: text/plain
+                policy: Kassini
+              authentication:
+                mode: BrowserToken
+                browserToken: test-token
+            """;
+
+        await using var app = await KassiniApplication.StartAsync(port, config);
+        using var httpClient = CreateHttpClient(followRedirects: false);
+
+        using var publicResponse = await httpClient.GetAsync(app.Url("/public"));
+        RequireEqual(HttpStatusCode.OK, publicResponse.StatusCode);
+        RequireEqual("Public response", await publicResponse.Content.ReadAsStringAsync());
+
+        using var anonymousResponse = await httpClient.GetAsync(app.Url("/profile"));
+        RequireEqual(HttpStatusCode.Found, anonymousResponse.StatusCode);
+        RequireEqual($"http://127.0.0.1:{port}/login?returnUrl=%2Fprofile", anonymousResponse.Headers.Location?.ToString());
+
+        using var loginResponse = await httpClient.GetAsync(app.Url("/login?t=test-token&returnUrl=%2Fprofile"));
+        RequireEqual(HttpStatusCode.Found, loginResponse.StatusCode);
+        RequireEqual("/profile", loginResponse.Headers.Location?.ToString());
+        RequireTrue(loginResponse.Headers.TryGetValues("Set-Cookie", out var cookies), "Expected authentication cookie.");
+
+        using var authenticatedRequest = new HttpRequestMessage(HttpMethod.Get, app.Url("/profile"));
+        authenticatedRequest.Headers.TryAddWithoutValidation("Cookie", cookies!.Single());
+
+        using var authenticatedResponse = await httpClient.SendAsync(authenticatedRequest);
+        RequireEqual(HttpStatusCode.OK, authenticatedResponse.StatusCode);
+        RequireEqual("Protected response", await authenticatedResponse.Content.ReadAsStringAsync());
+    }
+
+    [Test]
+    public async Task BrowserTokenAuthenticationProtectsEndpointProxies()
+    {
+        var port = GetFreePort();
+        await using var upstream = new UpstreamServer();
+        var config = $$"""
+            servers:
+            - bind:
+              - address: 127.0.0.1:{{port}}
+              endpoints:
+              - route: /proxy/*
+                policy: Kassini
+                proxy:
+                  destination: {{upstream.Url}}
+              authentication:
+                mode: BrowserToken
+                browserToken: proxy-token
+            """;
+
+        await using var app = await KassiniApplication.StartAsync(port, config);
+        using var httpClient = CreateHttpClient(followRedirects: false);
+
+        using var anonymousResponse = await httpClient.GetAsync(app.Url("/proxy/downstream?x=1"));
+        RequireEqual(HttpStatusCode.Found, anonymousResponse.StatusCode);
+        RequireEqual($"http://127.0.0.1:{port}/login?returnUrl=%2Fproxy%2Fdownstream%3Fx%3D1", anonymousResponse.Headers.Location?.ToString());
+
+        using var loginResponse = await httpClient.GetAsync(app.Url("/login?t=proxy-token&returnUrl=%2Fproxy%2Fdownstream%3Fx%3D1"));
+        RequireEqual(HttpStatusCode.Found, loginResponse.StatusCode);
+        RequireEqual("/proxy/downstream?x=1", loginResponse.Headers.Location?.ToString());
+        RequireTrue(loginResponse.Headers.TryGetValues("Set-Cookie", out var cookies), "Expected authentication cookie.");
+
+        using var authenticatedRequest = new HttpRequestMessage(HttpMethod.Get, app.Url("/proxy/downstream?x=1"));
+        authenticatedRequest.Headers.TryAddWithoutValidation("Cookie", cookies!.Single());
+
+        using var authenticatedResponse = await httpClient.SendAsync(authenticatedRequest);
+        RequireEqual(HttpStatusCode.OK, authenticatedResponse.StatusCode);
+        RequireEqual("upstream:/downstream?x=1", await authenticatedResponse.Content.ReadAsStringAsync());
+    }
+
+    [Test]
+    public async Task GoogleAuthenticationChallengesProtectedEndpointsWithGoogleAuthorizationEndpoint()
+    {
+        var port = GetFreePort();
+        var config = $$"""
+            servers:
+            - bind:
+              - address: 127.0.0.1:{{port}}
+              endpoints:
+              - route: /profile
+                body: Protected response
+                contentType: text/plain
+                policy: Kassini
+              authentication:
+                mode: Google
+                clientId: google-client
+                clientSecret: google-secret
+                scopes:
+                - email
+            """;
+
+        await using var app = await KassiniApplication.StartAsync(port, config);
+        using var httpClient = CreateHttpClient(followRedirects: false);
+
+        using var response = await httpClient.GetAsync(app.Url("/profile"));
+        RequireEqual(HttpStatusCode.Redirect, response.StatusCode);
+        var location = response.Headers.Location?.ToString();
+        RequireStartsWith("https://accounts.google.com/o/oauth2/v2/auth?", location);
+        RequireContains("client_id=google-client", location);
+        RequireContains(Uri.EscapeDataString($"http://127.0.0.1:{port}/signin-google"), location);
+        RequireContains("scope=", location);
+    }
+
+    [Test]
+    public async Task GitHubAuthenticationChallengesProtectedEndpointsWithGitHubAuthorizationEndpoint()
+    {
+        var port = GetFreePort();
+        var config = $$"""
+            servers:
+            - bind:
+              - address: 127.0.0.1:{{port}}
+              endpoints:
+              - route: /profile
+                body: Protected response
+                contentType: text/plain
+                policy: Kassini
+              authentication:
+                mode: GitHub
+                clientId: github-client
+                clientSecret: github-secret
+            """;
+
+        await using var app = await KassiniApplication.StartAsync(port, config);
+        using var httpClient = CreateHttpClient(followRedirects: false);
+
+        using var response = await httpClient.GetAsync(app.Url("/profile"));
+        RequireEqual(HttpStatusCode.Redirect, response.StatusCode);
+        var location = response.Headers.Location?.ToString();
+        RequireStartsWith("https://github.com/login/oauth/authorize?", location);
+        RequireContains("client_id=github-client", location);
+        RequireContains(Uri.EscapeDataString($"http://127.0.0.1:{port}/signin-github"), location);
+        RequireContains("scope=read%3Auser", location);
+        RequireContains("user%3Aemail", location);
+    }
+
+    [Test]
+    public async Task GenericOAuthAuthenticationUsesConfiguredAuthorizationEndpoint()
+    {
+        var port = GetFreePort();
+        var config = $$"""
+            servers:
+            - bind:
+              - address: 127.0.0.1:{{port}}
+              endpoints:
+              - route: /profile
+                body: Protected response
+                contentType: text/plain
+                policy: Kassini
+              authentication:
+                mode: OAuth
+                authorizationEndpoint: https://provider.example.com/oauth/authorize
+                tokenEndpoint: https://provider.example.com/oauth/token
+                userInformationEndpoint: https://provider.example.com/oauth/userinfo
+                callbackPath: /signin-provider
+                clientId: oauth-client
+                clientSecret: oauth-secret
+                scopes:
+                - profile
+            """;
+
+        await using var app = await KassiniApplication.StartAsync(port, config);
+        using var httpClient = CreateHttpClient(followRedirects: false);
+
+        using var response = await httpClient.GetAsync(app.Url("/profile"));
+        RequireEqual(HttpStatusCode.Redirect, response.StatusCode);
+        var location = response.Headers.Location?.ToString();
+        RequireStartsWith("https://provider.example.com/oauth/authorize?", location);
+        RequireContains("client_id=oauth-client", location);
+        RequireContains(Uri.EscapeDataString($"http://127.0.0.1:{port}/signin-provider"), location);
+        RequireContains("scope=profile", location);
+    }
+
     private static HttpClient CreateHttpClient(bool followRedirects = true)
     {
         return new HttpClient(new HttpClientHandler
@@ -472,6 +658,22 @@ public sealed class KassiniFunctionalTests
         if (actual == null || !actual.EndsWith(expectedSuffix, StringComparison.Ordinal))
         {
             throw new InvalidOperationException($"Expected value ending with '{expectedSuffix}', but received '{actual}'.");
+        }
+    }
+
+    private static void RequireStartsWith(string expectedPrefix, string? actual)
+    {
+        if (actual == null || !actual.StartsWith(expectedPrefix, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Expected value starting with '{expectedPrefix}', but received '{actual}'.");
+        }
+    }
+
+    private static void RequireContains(string expectedValue, string? actual)
+    {
+        if (actual == null || !actual.Contains(expectedValue, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Expected value containing '{expectedValue}', but received '{actual}'.");
         }
     }
 

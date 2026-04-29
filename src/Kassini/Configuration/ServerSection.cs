@@ -10,4 +10,5 @@ public class ServerSection
     public RedirectSection[] Redirect { get; set; } = [];
     public RewriteSection[] Rewrite { get; set; } = [];
     public ReverseProxySection? ReverseProxy { get; set; } = null;
+    public AuthenticationSection? Authentication { get; set; } = null;
 }

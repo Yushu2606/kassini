@@ -1,17 +1,29 @@
+using Kassini.Authentication;
 using Kassini.Configuration;
 using LettuceEncrypt;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Authentication.OAuth;
+using Microsoft.AspNetCore.Authentication.OpenIdConnect;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.OutputCaching;
 using Microsoft.AspNetCore.Rewrite;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using System.Net;
+using System.Net.Http.Headers;
+using System.Security.Claims;
+using System.Text.Json;
 using System.Threading.RateLimiting;
 using Yarp.ReverseProxy.Configuration;
 
 // Load configuration from arguments
 
-var configFilePath = args.Length > 0 ? args[0] : "simple.yml";
+var configFilePath = args.Length > 0 ? args[0] : "auth.yml";
 
 Console.WriteLine($"Loading configuration from {Path.GetFullPath(configFilePath)}");
 
@@ -92,10 +104,11 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
                 RouteId = routeId,
                 ClusterId = clusterId,
                 Match = new RouteMatch { Path = pattern }, // , Hosts = server.Hosts.Select(x => x.ToString()).ToArray()
+                AuthorizationPolicy = endpoint.Policy,
                 Transforms = [transforms]
             };
 
-            // {**catch-all}, 
+            // {**catch-all},
             // "Path": "/app1/{*any}",
 
             var cluster = new ClusterConfig() { ClusterId = clusterId, Destinations = new Dictionary<string, DestinationConfig>(StringComparer.OrdinalIgnoreCase) { { destinationId, new() { Address = endpoint.Proxy.Destination } } } };
@@ -240,6 +253,59 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
         tracerProviderBuilder.AddSource("Yarp.ReverseProxy");
     });
 
+    var authenticationScheme = "kassini";
+
+    if (server.Authentication != null)
+    {
+        var authentication = builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme);
+        ConfigureAuthentication(authentication, server.Authentication, authenticationScheme);
+
+        builder.Services.AddAuthorization(options =>
+        {
+            options.AddPolicy(AuthorizationDefaults.PolicyName, CreateAuthenticationPolicy());
+
+            foreach (var policy in server.Authentication.Policies)
+            {
+                options.AddPolicy(policy.Key, CreateAuthenticationPolicy(policy.Value));
+            }
+
+            AuthorizationPolicy CreateAuthenticationPolicy(PolicySection? policySection = null)
+            {
+                var policyBuilder = server.Authentication.Mode == AuthenticationMode.Unsecured
+                    ? new AuthorizationPolicyBuilder()
+                    : new AuthorizationPolicyBuilder(authenticationScheme);
+
+                policyBuilder.RequireAuthenticationPolicy(server.Authentication);
+
+                if (policySection != null)
+                {
+                    policyBuilder.RequirePolicySection(policySection);
+                }
+
+                return policyBuilder.Build();
+            }
+
+        });
+    }
+    else
+    {
+        builder.Services.AddAuthorization(options =>
+        {
+            options.AddPolicy(
+                name: AuthorizationDefaults.PolicyName,
+                policy: new AuthorizationPolicyBuilder()
+                    .RequireAssertion(_ =>
+                    {
+                        // our policy doesn't require anything.
+                        return true;
+                    })
+                    .Build());
+        });
+    }
+
+    // TODO: Convert this to IOptions
+    builder.Services.AddSingleton(server);
+
     builder.WebHost.ConfigureKestrel((context, options) =>
     {
         // Default to http1 and http2 if no protocols are specified
@@ -311,6 +377,67 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
         app.UseHttpsRedirection();
     }
 
+    if (hasProxiedRoutes || server.ReverseProxy != null)
+    {
+        app.UseRouting();
+    }
+
+    if (server.Authentication != null)
+    {
+        if (server.Authentication.Mode == AuthenticationMode.BrowserToken)
+        {
+            app.UseMiddleware<ValidateTokenMiddleware>();
+        }
+
+        app.UseAuthentication();
+        app.UseAuthorization();
+
+        if (server.Authentication.Mode == AuthenticationMode.BrowserToken)
+        {
+            app.MapGet("/login", (HttpContext httpContext) =>
+            {
+                var returnUrl = httpContext.Request.Query[CookieAuthenticationDefaults.ReturnUrlParameter].ToString();
+                var action = "/api/validatetoken";
+
+                if (!string.IsNullOrWhiteSpace(returnUrl))
+                {
+                    action += $"?{CookieAuthenticationDefaults.ReturnUrlParameter}={Uri.EscapeDataString(returnUrl)}";
+                }
+
+                var html = $"""
+                    <form method="post" action="{WebUtility.HtmlEncode(action)}">
+                        <label>Token <input name="token" type="password" autocomplete="current-password" /></label>
+                        <button type="submit">Sign in</button>
+                    </form>
+                    """;
+
+                return Results.Content(html, contentType: "text/html");
+            });
+
+            app.MapPost("/api/validatetoken", async (HttpContext httpContext) =>
+            {
+                var token = httpContext.Request.Query["token"].ToString();
+
+                if (string.IsNullOrEmpty(token) && httpContext.Request.HasFormContentType)
+                {
+                    var form = await httpContext.Request.ReadFormAsync().ConfigureAwait(false);
+                    token = form["token"].ToString();
+                }
+
+                if (await ValidateTokenMiddleware.TryAuthenticateAsync(token, httpContext, server.Authentication.BrowserToken).ConfigureAwait(false))
+                {
+                    var returnUrl = httpContext.Request.Query[CookieAuthenticationDefaults.ReturnUrlParameter].ToString();
+                    return Results.Redirect(ValidateTokenMiddleware.GetSafeReturnUrl(returnUrl));
+                }
+
+                var safeReturnUrl = ValidateTokenMiddleware.GetSafeReturnUrl(
+                    httpContext.Request.Query[CookieAuthenticationDefaults.ReturnUrlParameter].ToString());
+
+                return Results.Redirect($"/login?{CookieAuthenticationDefaults.ReturnUrlParameter}={Uri.EscapeDataString(safeReturnUrl)}");
+            });
+        }
+    }
+
     if (server.Redirect.Any() || server.Rewrite.Any())
     {
         var options = new RewriteOptions();
@@ -345,8 +472,12 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
 
     if (hasProxiedRoutes || server.ReverseProxy != null)
     {
-        app.UseRouting();
-        app.MapReverseProxy();
+        var reverseProxy = app.MapReverseProxy();
+
+        if (server.ReverseProxy?.Policy is { } policy)
+        {
+            reverseProxy.RequireAuthorization(policy);
+        }
     }
 
     if (server.ResponseCompression != null && server.ResponseCompression.Enabled)
@@ -460,9 +591,238 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
         {
             routeHandlerBuilder = routeHandlerBuilder!.RequireRateLimiting(endpoint.RateLimit.Policy);
         }
+
+        if (endpoint.Policy != null)
+        {
+            routeHandlerBuilder = routeHandlerBuilder!.RequireAuthorization(endpoint.Policy);
+        }
     }
 
     webApplications.Add(app);
 }
 
 Task.WaitAll(webApplications.Select(x => x.RunAsync()).ToArray());
+
+static void ConfigureAuthentication(AuthenticationBuilder authentication, AuthenticationSection authenticationSection, string authenticationScheme)
+{
+    var challengeScheme = authenticationSection.Mode switch
+    {
+        AuthenticationMode.OpenIdConnect => OpenIdConnectDefaults.AuthenticationScheme,
+        AuthenticationMode.Google => GoogleDefaults.AuthenticationScheme,
+        AuthenticationMode.GitHub => "GitHub",
+        AuthenticationMode.OAuth => "OAuth",
+        _ => CookieAuthenticationDefaults.AuthenticationScheme
+    };
+
+    authentication.AddPolicyScheme(authenticationScheme, displayName: authenticationScheme, options =>
+    {
+        options.ForwardDefault = CookieAuthenticationDefaults.AuthenticationScheme;
+
+        if (IsExternalAuthenticationMode(authenticationSection.Mode))
+        {
+            options.ForwardChallenge = challengeScheme;
+        }
+    });
+
+    authentication.AddCookie(options =>
+    {
+        if (authenticationSection.Mode == AuthenticationMode.BrowserToken)
+        {
+            options.LoginPath = "/login";
+            options.ReturnUrlParameter = "returnUrl";
+            options.ExpireTimeSpan = TimeSpan.FromDays(3);
+            options.Events.OnSigningIn = context =>
+            {
+                // This distinguishes browser-token cookies from cookies issued by external providers.
+                var claimsIdentity = (ClaimsIdentity)context.Principal!.Identity!;
+                claimsIdentity.AddClaim(new Claim(AuthorizationDefaults.BrowserTokenClaimName, bool.TrueString));
+                return Task.CompletedTask;
+            };
+        }
+    });
+
+    switch (authenticationSection.Mode)
+    {
+        case AuthenticationMode.OpenIdConnect:
+            ValidateClientCredentials(authenticationSection);
+            ValidateOpenIdConnectConfiguration(authenticationSection);
+            authentication.AddOpenIdConnect(OpenIdConnectDefaults.AuthenticationScheme, options => ConfigureOpenIdConnect(options, authenticationSection));
+            break;
+        case AuthenticationMode.Google:
+            ValidateClientCredentials(authenticationSection);
+            authentication.AddGoogle(GoogleDefaults.AuthenticationScheme, options => ConfigureGoogle(options, authenticationSection));
+            break;
+        case AuthenticationMode.GitHub:
+            ValidateClientCredentials(authenticationSection);
+            authentication.AddOAuth("GitHub", options => ConfigureGitHub(options, authenticationSection));
+            break;
+        case AuthenticationMode.OAuth:
+            ValidateClientCredentials(authenticationSection);
+            ValidateOAuthConfiguration(authenticationSection);
+            authentication.AddOAuth("OAuth", options => ConfigureOAuth(options, authenticationSection, defaultScopes: []));
+            break;
+        case AuthenticationMode.BrowserToken:
+        case AuthenticationMode.Unsecured:
+            break;
+        default:
+            throw new NotSupportedException($"Unexpected {nameof(AuthenticationMode)} enum member: {authenticationSection.Mode}");
+    }
+}
+
+static void ConfigureOpenIdConnect(OpenIdConnectOptions options, AuthenticationSection authenticationSection)
+{
+    options.ClientId = authenticationSection.ClientId;
+    options.ClientSecret = authenticationSection.ClientSecret;
+    options.ResponseType = OpenIdConnectResponseType.Code;
+    options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    options.CallbackPath = authenticationSection.CallbackPath ?? "/signin-oidc";
+    options.SaveTokens = authenticationSection.SaveTokens;
+    options.GetClaimsFromUserInfoEndpoint = authenticationSection.GetClaimsFromUserInfoEndpoint;
+    options.TokenValidationParameters.NameClaimType = authenticationSection.NameClaimType;
+    options.TokenValidationParameters.RoleClaimType = authenticationSection.RoleClaimType;
+
+    if (!string.IsNullOrWhiteSpace(authenticationSection.Authority))
+    {
+        options.Authority = authenticationSection.Authority;
+    }
+
+    if (!string.IsNullOrWhiteSpace(authenticationSection.MetadataAddress))
+    {
+        options.MetadataAddress = authenticationSection.MetadataAddress;
+    }
+
+    AddScopes(options.Scope, [OpenIdConnectScope.OpenId, "profile"], authenticationSection.Scopes);
+}
+
+static void ConfigureGoogle(GoogleOptions options, AuthenticationSection authenticationSection)
+{
+    options.ClientId = authenticationSection.ClientId!;
+    options.ClientSecret = authenticationSection.ClientSecret!;
+    options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    options.CallbackPath = authenticationSection.CallbackPath ?? "/signin-google";
+    options.SaveTokens = authenticationSection.SaveTokens;
+
+    AddScopes(options.Scope, defaultScopes: [], authenticationSection.Scopes);
+}
+
+static void ConfigureGitHub(OAuthOptions options, AuthenticationSection authenticationSection)
+{
+    ConfigureOAuth(options, authenticationSection, ["read:user", "user:email"], mapClaims: authenticationSection.ClaimMappings.Count > 0);
+
+    options.AuthorizationEndpoint = "https://github.com/login/oauth/authorize";
+    options.TokenEndpoint = "https://github.com/login/oauth/access_token";
+    options.UserInformationEndpoint = "https://api.github.com/user";
+    options.CallbackPath = authenticationSection.CallbackPath ?? "/signin-github";
+
+    if (authenticationSection.ClaimMappings.Count == 0)
+    {
+        options.ClaimActions.MapJsonKey(ClaimTypes.NameIdentifier, "id");
+        options.ClaimActions.MapJsonKey(ClaimTypes.Name, "login");
+        options.ClaimActions.MapJsonKey("urn:github:name", "name");
+        options.ClaimActions.MapJsonKey(ClaimTypes.Email, "email");
+    }
+}
+
+static void ConfigureOAuth(OAuthOptions options, AuthenticationSection authenticationSection, string[] defaultScopes, bool mapClaims = true)
+{
+    options.ClientId = authenticationSection.ClientId!;
+    options.ClientSecret = authenticationSection.ClientSecret!;
+    options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    options.AuthorizationEndpoint = authenticationSection.AuthorizationEndpoint ?? options.AuthorizationEndpoint;
+    options.TokenEndpoint = authenticationSection.TokenEndpoint ?? options.TokenEndpoint;
+    options.UserInformationEndpoint = authenticationSection.UserInformationEndpoint ?? options.UserInformationEndpoint;
+    options.CallbackPath = authenticationSection.CallbackPath ?? "/signin-oauth";
+    options.SaveTokens = authenticationSection.SaveTokens;
+
+    AddScopes(options.Scope, defaultScopes, authenticationSection.Scopes);
+    if (mapClaims)
+    {
+        MapOAuthClaims(options, authenticationSection);
+    }
+
+    options.Events.OnCreatingTicket = async context =>
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, context.Options.UserInformationEndpoint);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", context.AccessToken);
+        request.Headers.UserAgent.ParseAdd("Kassini");
+
+        using var response = await context.Backchannel.SendAsync(request, context.HttpContext.RequestAborted).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync(context.HttpContext.RequestAborted).ConfigureAwait(false));
+        context.RunClaimActions(payload.RootElement);
+    };
+}
+
+static void MapOAuthClaims(OAuthOptions options, AuthenticationSection authenticationSection)
+{
+    if (authenticationSection.ClaimMappings.Count > 0)
+    {
+        foreach (var claimMapping in authenticationSection.ClaimMappings)
+        {
+            options.ClaimActions.MapJsonKey(claimMapping.Key, claimMapping.Value);
+        }
+    }
+    else
+    {
+        options.ClaimActions.MapJsonKey(ClaimTypes.NameIdentifier, "id");
+        options.ClaimActions.MapJsonKey(ClaimTypes.Name, "name");
+        options.ClaimActions.MapJsonKey(ClaimTypes.Email, "email");
+    }
+}
+
+static void AddScopes(ICollection<string> scopes, string[] defaultScopes, string[] configuredScopes)
+{
+    foreach (var scope in defaultScopes.Concat(configuredScopes))
+    {
+        if (!scopes.Contains(scope))
+        {
+            scopes.Add(scope);
+        }
+    }
+}
+
+static bool IsExternalAuthenticationMode(AuthenticationMode mode)
+{
+    return mode is AuthenticationMode.OpenIdConnect or AuthenticationMode.Google or AuthenticationMode.GitHub or AuthenticationMode.OAuth;
+}
+
+static void ValidateClientCredentials(AuthenticationSection authenticationSection)
+{
+    if (string.IsNullOrWhiteSpace(authenticationSection.ClientId))
+    {
+        throw new InvalidOperationException($"Authentication mode '{authenticationSection.Mode}' requires a non-empty clientId.");
+    }
+
+    if (string.IsNullOrWhiteSpace(authenticationSection.ClientSecret))
+    {
+        throw new InvalidOperationException($"Authentication mode '{authenticationSection.Mode}' requires a non-empty clientSecret.");
+    }
+}
+
+static void ValidateOpenIdConnectConfiguration(AuthenticationSection authenticationSection)
+{
+    if (string.IsNullOrWhiteSpace(authenticationSection.Authority) && string.IsNullOrWhiteSpace(authenticationSection.MetadataAddress))
+    {
+        throw new InvalidOperationException("OpenIdConnect authentication requires authority or metadataAddress.");
+    }
+}
+
+static void ValidateOAuthConfiguration(AuthenticationSection authenticationSection)
+{
+    if (string.IsNullOrWhiteSpace(authenticationSection.AuthorizationEndpoint))
+    {
+        throw new InvalidOperationException("OAuth authentication requires authorizationEndpoint.");
+    }
+
+    if (string.IsNullOrWhiteSpace(authenticationSection.TokenEndpoint))
+    {
+        throw new InvalidOperationException("OAuth authentication requires tokenEndpoint.");
+    }
+
+    if (string.IsNullOrWhiteSpace(authenticationSection.UserInformationEndpoint))
+    {
+        throw new InvalidOperationException("OAuth authentication requires userInformationEndpoint.");
+    }
+}

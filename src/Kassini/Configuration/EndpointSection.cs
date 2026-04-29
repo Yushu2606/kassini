@@ -35,7 +35,7 @@ public class EndpointSection
     // Cache
     public CacheSection? Cache { get; set; } = null;
 
-    // Rate limitting
+    // Rate limiting
     public RateLimitSection? RateLimit { get; set; } = null;
 
     // Redirection
@@ -45,4 +45,6 @@ public class EndpointSection
     public string Methods { get; set; } = "GET";
 
     public string[] GetMethods() => Methods.Split(' ', ',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    public string? Policy { get; set; } = null;
 }

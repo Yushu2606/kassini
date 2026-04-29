@@ -1,0 +1,51 @@
+﻿servers:
+
+  - bind:
+    - address: '*:8084'
+      protocols:
+      - http1
+
+    endpoints:
+
+    - route: /
+      body: <h1>Hello World<h1>
+      contentType: text/html
+
+    - route: /profile
+      body: <h1>Your profile<h1>
+      policy: Kassini
+
+    authentication:
+      mode: BrowserToken
+      browserToken: local-demo-token
+
+      # External provider examples:
+      #
+      # Google:
+      # mode: Google
+      # clientId: your-google-client-id
+      # clientSecret: your-google-client-secret
+      # scopes:
+      # - email
+      #
+      # GitHub:
+      # mode: GitHub
+      # clientId: your-github-client-id
+      # clientSecret: your-github-client-secret
+      #
+      # Generic OpenID Connect:
+      # mode: OpenIdConnect
+      # authority: https://login.example.com
+      # clientId: your-oidc-client-id
+      # clientSecret: your-oidc-client-secret
+      #
+      # Generic OAuth 2.0:
+      # mode: OAuth
+      # authorizationEndpoint: https://provider.example.com/oauth/authorize
+      # tokenEndpoint: https://provider.example.com/oauth/token
+      # userInformationEndpoint: https://provider.example.com/oauth/userinfo
+      # clientId: your-oauth-client-id
+      # clientSecret: your-oauth-client-secret
+      # claimMappings:
+      #   http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier: id
+      #   http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name: name
