@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" Version="1.41.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Kassini/Kassini.csproj" ReferenceOutputAssembly="false" PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="CopyKassiniOutput" AfterTargets="Build">
+    <ItemGroup>
+      <KassiniOutput Include="../Kassini/bin/$(Configuration)/$(TargetFramework)/**/*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(KassiniOutput)"
+          DestinationFiles="@(KassiniOutput->'$(OutputPath)KassiniApp/%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

@@ -5,6 +5,8 @@ VisualStudioVersion = 17.4.33015.44
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kassini", "Kassini\Kassini.csproj", "{B2D7135A-83EB-4441-ADB8-B5AADAF4D5FC}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Kassini.FunctionalTests", "Kassini.FunctionalTests\Kassini.FunctionalTests.csproj", "{771F80D8-9C6A-4C2E-80D8-76DA7EAE763F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -15,6 +17,10 @@ Global
 		{B2D7135A-83EB-4441-ADB8-B5AADAF4D5FC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B2D7135A-83EB-4441-ADB8-B5AADAF4D5FC}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B2D7135A-83EB-4441-ADB8-B5AADAF4D5FC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{771F80D8-9C6A-4C2E-80D8-76DA7EAE763F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{771F80D8-9C6A-4C2E-80D8-76DA7EAE763F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{771F80D8-9C6A-4C2E-80D8-76DA7EAE763F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{771F80D8-9C6A-4C2E-80D8-76DA7EAE763F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

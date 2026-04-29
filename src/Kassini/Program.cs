@@ -343,7 +343,7 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
         app.UseRateLimiter();
     }
 
-    if (hasProxiedRoutes)
+    if (hasProxiedRoutes || server.ReverseProxy != null)
     {
         app.UseRouting();
         app.MapReverseProxy();
