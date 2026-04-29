@@ -23,11 +23,7 @@ using Yarp.ReverseProxy.Configuration;
 
 // Load configuration from arguments
 
-var configFilePath = args.Length > 0 ? args[0] : "auth.yml";
-
-Console.WriteLine($"Loading configuration from {Path.GetFullPath(configFilePath)}");
-
-var configurationSource = ConfigurationSource.Parse(configFilePath);
+var configurationSource = LoadConfiguration(args);
 
 // TODO: Validation
 // - File paths should exist
@@ -602,6 +598,33 @@ foreach (var server in configurationSource.ConfigurationSection.Servers)
 }
 
 Task.WaitAll(webApplications.Select(x => x.RunAsync()).ToArray());
+
+static ConfigurationSource LoadConfiguration(string[] args)
+{
+    string[] defaultConfigFilePaths = ["kassini.config.yml", "kassini.config.json"];
+    string? configFilePath;
+
+    if (args.Length > 0)
+    {
+        configFilePath = args[0];
+    }
+    else
+    {
+        configFilePath = defaultConfigFilePaths.FirstOrDefault(File.Exists);
+    }
+
+    if (configFilePath == null)
+    {
+        var searchedPaths = string.Join(", ", defaultConfigFilePaths.Select(Path.GetFullPath));
+        Console.WriteLine($"No configuration file was specified and no default configuration file was found. Searched: {searchedPaths}.");
+        return new ConfigurationSource(new Kassini.Configuration.ConfigurationSection());
+    }
+
+    var fullConfigFilePath = Path.GetFullPath(configFilePath);
+    Console.WriteLine($"Loading configuration from {fullConfigFilePath}");
+
+    return ConfigurationSource.Parse(configFilePath);
+}
 
 static void ConfigureAuthentication(AuthenticationBuilder authentication, AuthenticationSection authenticationSection, string authenticationScheme)
 {

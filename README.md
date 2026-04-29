@@ -4,7 +4,7 @@ Kassini is a configurable .NET reverse proxy and lightweight endpoint host. It r
 
 ## Run Kassini
 
-Pass the configuration file path as the first argument. If no argument is provided, Kassini loads `auth.yml` from the current directory.
+Pass the configuration file path as the first argument. If no argument is provided, Kassini loads `kassini.config.yml` or `kassini.config.json` from the current directory when either exists; otherwise it starts with an empty configuration and exits successfully.
 
 ```console
 dotnet run --project src/Kassini -- src/Kassini/simple.yml
@@ -17,7 +17,7 @@ Published single-file builds use the `kassini` executable name:
 .\.artifacts\win-x64\kassini.exe .\config.yml
 ```
 
-Creating a GitHub Release with a tag matching `v*.*.*` publishes single-file release assets for Windows, Linux, and macOS on x64 and arm64. Windows assets are `.zip` files; Linux and macOS assets are `.tar.gz` files.
+Creating a GitHub Release with a tag matching `v*.*.*` publishes single-file release assets for Windows, Linux, and macOS on x64 and arm64. Windows assets are `.zip` files; Linux and macOS assets are `.tar.gz` files that preserve the executable bit.
 
 Build and run the Docker image locally:
 

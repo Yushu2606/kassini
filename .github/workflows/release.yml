@@ -111,6 +111,7 @@ jobs:
         if [[ "$ARCHIVE" == "zip" ]]; then
           (cd "artifacts/$RID" && zip -9 "../../upload/$asset" "$EXECUTABLE")
         else
+          chmod 755 "artifacts/$RID/$EXECUTABLE"
           tar -czf "upload/$asset" -C "artifacts/$RID" "$EXECUTABLE"
         fi
 

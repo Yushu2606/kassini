@@ -11,6 +11,48 @@ namespace Kassini.FunctionalTests;
 public sealed class KassiniFunctionalTests
 {
     [Test]
+    public async Task MissingDefaultConfigurationFileExitsSuccessfully()
+    {
+        var result = await KassiniApplication.RunToExitAsync([]);
+
+        RequireEqual(0, result.ExitCode);
+        RequireContains("kassini.config.yml", result.Logs);
+        RequireContains("kassini.config.json", result.Logs);
+    }
+
+    [Test]
+    public async Task DefaultYamlConfigurationFileIsLoaded()
+    {
+        var result = await KassiniApplication.RunToExitAsync(
+            [],
+            new Dictionary<string, string>
+            {
+                ["kassini.config.yml"] = "servers: []"
+            });
+
+        RequireEqual(0, result.ExitCode);
+        RequireContains("kassini.config.yml", result.Logs);
+    }
+
+    [Test]
+    public async Task DefaultJsonConfigurationFileIsLoaded()
+    {
+        var result = await KassiniApplication.RunToExitAsync(
+            [],
+            new Dictionary<string, string>
+            {
+                ["kassini.config.json"] = """
+                    {
+                      "servers": []
+                    }
+                    """
+            });
+
+        RequireEqual(0, result.ExitCode);
+        RequireContains("kassini.config.json", result.Logs);
+    }
+
+    [Test]
     public async Task BodyEndpointsApplyMethodsHeadersStatusAndContentType()
     {
         var port = GetFreePort();
@@ -722,21 +764,8 @@ public sealed class KassiniFunctionalTests
                 }
             }
 
-            var appPath = Path.Combine(AppContext.BaseDirectory, "KassiniApp", "kassini.dll");
-            if (!File.Exists(appPath))
-            {
-                throw new FileNotFoundException("Kassini application output was not copied to the functional test output directory.", appPath);
-            }
-
             var logs = new ConcurrentQueue<string>();
-            var processStartInfo = new ProcessStartInfo(ResolveDotNetHostPath())
-            {
-                WorkingDirectory = workspaceRoot,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false
-            };
-            processStartInfo.ArgumentList.Add(appPath);
+            var processStartInfo = CreateProcessStartInfo(workspaceRoot);
             processStartInfo.ArgumentList.Add(configPath);
 
             var process = Process.Start(processStartInfo)
@@ -765,6 +794,50 @@ public sealed class KassiniFunctionalTests
             {
                 await app.DisposeAsync();
                 throw;
+            }
+        }
+
+        public static async Task<KassiniProcessResult> RunToExitAsync(IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string>? files = null)
+        {
+            var workspaceRoot = Directory.CreateTempSubdirectory("kassini-functional-").FullName;
+
+            try
+            {
+                if (files != null)
+                {
+                    foreach (var file in files)
+                    {
+                        var filePath = Path.Combine(workspaceRoot, file.Key);
+                        Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+                        await File.WriteAllTextAsync(filePath, file.Value);
+                    }
+                }
+
+                var logs = new ConcurrentQueue<string>();
+                var processStartInfo = CreateProcessStartInfo(workspaceRoot);
+
+                foreach (var argument in arguments)
+                {
+                    processStartInfo.ArgumentList.Add(argument);
+                }
+
+                using var process = Process.Start(processStartInfo)
+                    ?? throw new InvalidOperationException("Failed to start Kassini process.");
+
+                var standardOutputTask = DrainOutputAsync(process.StandardOutput, logs);
+                var standardErrorTask = DrainOutputAsync(process.StandardError, logs);
+
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                await Task.WhenAll(standardOutputTask, standardErrorTask).WaitAsync(TimeSpan.FromSeconds(5));
+
+                return new KassiniProcessResult(process.ExitCode, string.Join(Environment.NewLine, logs));
+            }
+            finally
+            {
+                if (Directory.Exists(workspaceRoot))
+                {
+                    Directory.Delete(workspaceRoot, recursive: true);
+                }
             }
         }
 
@@ -829,6 +902,26 @@ public sealed class KassiniFunctionalTests
 
         private string GetLogs() => string.Join(Environment.NewLine, _logs);
 
+        private static ProcessStartInfo CreateProcessStartInfo(string workspaceRoot)
+        {
+            var appPath = Path.Combine(AppContext.BaseDirectory, "KassiniApp", "kassini.dll");
+            if (!File.Exists(appPath))
+            {
+                throw new FileNotFoundException("Kassini application output was not copied to the functional test output directory.", appPath);
+            }
+
+            var processStartInfo = new ProcessStartInfo(ResolveDotNetHostPath())
+            {
+                WorkingDirectory = workspaceRoot,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            };
+            processStartInfo.ArgumentList.Add(appPath);
+
+            return processStartInfo;
+        }
+
         private static string ResolveDotNetHostPath()
         {
             var hostPath = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
@@ -861,6 +954,8 @@ public sealed class KassiniFunctionalTests
                 logs.Enqueue(line);
             }
         }
+
+        public sealed record KassiniProcessResult(int ExitCode, string Logs);
     }
 
     private sealed class UpstreamServer : IAsyncDisposable
