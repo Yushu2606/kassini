@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <OutputType>Exe</OutputType>
-    <AssemblyName>yarp</AssemblyName>
+    <AssemblyName>kassini</AssemblyName>
     
     <RestoreSources>
       https://api.nuget.org/v3/index.json;

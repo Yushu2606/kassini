@@ -20,4 +20,4 @@ WORKDIR /App
 COPY --from=build-env /App/out .
 
 # The /etc/kassini/config.yml is bound to a host file
-ENTRYPOINT ["dotnet", "yarp.dll", "/etc/kassini/config.yml"]
+ENTRYPOINT ["dotnet", "kassini.dll", "/etc/kassini/config.yml"]

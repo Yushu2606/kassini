@@ -1,1 +1,1 @@
-docker buildx build -f Dockerfile -t kassini/yarp:latest .
+docker buildx build -f Dockerfile -t kassini:latest .

@@ -722,7 +722,7 @@ public sealed class KassiniFunctionalTests
                 }
             }
 
-            var appPath = Path.Combine(AppContext.BaseDirectory, "KassiniApp", "yarp.dll");
+            var appPath = Path.Combine(AppContext.BaseDirectory, "KassiniApp", "kassini.dll");
             if (!File.Exists(appPath))
             {
                 throw new FileNotFoundException("Kassini application output was not copied to the functional test output directory.", appPath);
