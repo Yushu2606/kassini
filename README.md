@@ -1,6 +1,6 @@
 # Kassini
 
-Kassini is a configurable .NET reverse proxy and lightweight endpoint host. It reads a YAML or JSON configuration file and starts one or more HTTP servers with static responses, files, redirects, rewrites, proxy routes, compression, caching, rate limiting, certificates, and authentication.
+Kassini is a configurable .NET reverse proxy and lightweight endpoint host. It reads a YAML, JSON or TOML configuration file and starts one or more HTTP servers with static responses, files, redirects, rewrites, proxy routes, compression, caching, rate limiting, certificates, and authentication.
 
 ## Run Kassini
 
@@ -46,7 +46,7 @@ builder.AddResource(kassini)
 
 ## Configuration format
 
-Kassini accepts `.yml`, `.yaml`, and `.json` configuration files. YAML examples use camel-case property names; JSON uses the same property names.
+Kassini accepts `.yml`, `.yaml`, `.json` and `.toml` configuration files. YAML examples use camel-case property names; JSON and TOML uses the same property names.
 
 The top-level configuration contains:
 
