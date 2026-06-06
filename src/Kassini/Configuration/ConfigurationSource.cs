@@ -1,6 +1,7 @@
-﻿using Kassini.Authentication;
+using Kassini.Authentication;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tomlyn;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -21,6 +22,7 @@ public class ConfigurationSource
             {
                 ".json" => ParseJson(configStream),
                 ".yml" or ".yaml" => ParseYaml(configStream),
+                ".toml" => ParseToml(configStream),
                 _ => throw new NotSupportedException("Unrecognized configuration file extension"),
             };
         }
@@ -50,6 +52,18 @@ public class ConfigurationSource
         };
 
         var configurationSection = JsonSerializer.Deserialize<ConfigurationSection>(sourceStream, jsonSerializerOptions);
+
+        return new ConfigurationSource(configurationSection ?? new ConfigurationSection());
+    }
+
+    public static ConfigurationSource ParseToml(Stream sourceStream)
+    {
+        var tomlSerializerOptions = new TomlSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        };
+
+        var configurationSection = TomlSerializer.Deserialize<ConfigurationSection>(sourceStream, tomlSerializerOptions);
 
         return new ConfigurationSource(configurationSection ?? new ConfigurationSection());
     }
